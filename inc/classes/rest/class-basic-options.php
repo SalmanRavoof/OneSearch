@@ -1816,10 +1816,8 @@ class Basic_Options {
 	 * Permission callback function to authenticate via admin permission and token.
 	 *
 	 * @param \WP_REST_Request $request The incoming REST request.
-	 *
-	 * @return \WP_Error|true True if allowed, or WP_Error if not.
 	 */
-	public function permission_admin_or_token( \WP_REST_Request $request ) {
+	public function permission_admin_or_token( \WP_REST_Request $request ): bool {
 		if ( current_user_can( 'manage_options' ) ) {
 			return true;
 		}
