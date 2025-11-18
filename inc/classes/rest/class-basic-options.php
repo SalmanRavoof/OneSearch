@@ -1448,7 +1448,7 @@ class Basic_Options {
 					return new \WP_Error(
 						'reindex_failed',
 						sprintf(
-							// translators: %s: error message
+							// translators: %s: error message.
 							__( 'Re-indexing failed: %s.', 'onesearch' ),
 							$indexed->get_error_message()
 						),

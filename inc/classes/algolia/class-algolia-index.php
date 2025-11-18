@@ -44,7 +44,6 @@ class Algolia_Index {
 
 		// Bail if no entities to index.
 		if ( empty( $site_indexable_entities ) ) {
-
 			return true;
 		}
 
@@ -53,7 +52,7 @@ class Algolia_Index {
 		$index->setSettings( $settings );
 
 		// Batched indexing across pages.
-		$batch_size  = 100;
+		$batch_size = 100;
 
 		// Use generator pattern for memory-efficient batch processing.
 		foreach ( $this->fetch_post_batches( $site_indexable_entities, $batch_size ) as $records ) {
