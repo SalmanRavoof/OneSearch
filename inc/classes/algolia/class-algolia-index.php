@@ -349,6 +349,7 @@ class Algolia_Index {
 
 		// Size threshold: 9KB to constraint payload size.
 		if ( $json_size <= 9000 ) {
+			error_log( 'no need to chunk ' . $record['objectID'] . ' size=' . $json_size );
 			return [ $record ];
 		}
 
@@ -357,10 +358,11 @@ class Algolia_Index {
 		$base_record = $record;
 		unset( $base_record['content'] );
 
-		$base_size       = strlen( wp_json_encode( $base_record ) ?: '' );
+		$base_size       = strlen( wp_json_encode( $base_record, JSON_INVALID_UTF8_SUBSTITUTE ) ?: '' );
 		$available_space = 8000 - $base_size; // Per-chunk allowed size (left size).
 
 		if ( $available_space <= 0 ) {
+			error_log( 'cannot chunk ' . $record['objectID'] . ' base size=' . $base_size );
 			return [];
 		}
 
