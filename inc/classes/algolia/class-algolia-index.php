@@ -21,6 +21,18 @@ class Algolia_Index {
 	use Singleton;
 
 	/**
+	 * Algolia record size limit.
+	 *
+	 * @todo make filterable via a constant or setting.
+	 */
+	private const TOTAL_LIMIT = 9000;
+
+	/**
+	 * Per-chunk size limit.
+	 */
+	private const PER_CHUNK_LIMIT = 8000;
+
+	/**
 	 * Index the post types into Algolia.
 	 *
 	 * @param string[] $site_indexable_entities Post types to index (e.g. ['post','page']).
@@ -79,7 +91,7 @@ class Algolia_Index {
 		$default_settings = [
 			'attributeForDistinct'  => 'parent_post_id',
 			'distinct'              => 1,
-			'searchableAttributes'  => [ 'title', 'clean_content', 'excerpt', 'author_display_name' ],
+			'searchableAttributes'  => [ 'title', 'content', 'excerpt', 'author_display_name' ],
 			'attributesForFaceting' => [
 				'filterOnly(parent_post_id)',
 				'filterOnly(site_url)',
@@ -153,8 +165,7 @@ class Algolia_Index {
 					'objectID'               => $site_key . '_' . $post->ID,
 					'title'                  => $post->post_title,
 					'excerpt'                => get_the_excerpt( $post ),
-					'content'                => $post->post_content,
-					'clean_content'          => $this->get_clean_content( $post->post_content ),
+					'content'                =>  $this->get_clean_content( $post->post_content ),
 					'name'                   => $post->post_name,
 					'type'                   => $post->post_type,
 					'permalink'              => get_permalink( $post->ID ),
@@ -347,8 +358,8 @@ class Algolia_Index {
 			return [];
 		}
 
-		// Size threshold: 9KB to constraint payload size.
-		if ( $json_size <= 9000 ) {
+		// If the record is within limits, return as-is.
+		if ( $json_size <= self::TOTAL_LIMIT ) {
 			error_log( 'no need to chunk ' . $record['objectID'] . ' size=' . $json_size );
 			return [ $record ];
 		}
@@ -359,11 +370,16 @@ class Algolia_Index {
 		unset( $base_record['content'] );
 
 		$base_size       = strlen( wp_json_encode( $base_record, JSON_INVALID_UTF8_SUBSTITUTE ) ?: '' );
-		$available_space = 8000 - $base_size; // Per-chunk allowed size (left size).
+		$available_space = self::PER_CHUNK_LIMIT - $base_size;
 
+		// If the base is too large, we cannot chunk this record meaningfully.
 		if ( $available_space <= 0 ) {
-			error_log( 'cannot chunk ' . $record['objectID'] . ' base size=' . $base_size );
-			return [];
+			error_log( 'cannot chunk ' . $record['objectID'] . ' base size=' . $base_size  . print_r( $base_record, true ) );
+			$base_record['content']                = '';
+			$base_record['is_chunked']             = false;
+			$base_record['onesearch_chunk_index']  = 0;
+			$base_record['onesearch_total_chunks'] = 1;
+			return [ $base_record ];
 		}
 
 		$chunks          = $this->smart_chunk_content( $content, $available_space );
@@ -376,6 +392,30 @@ class Algolia_Index {
 			$chunk_record['is_chunked']             = true;
 			$chunk_record['onesearch_chunk_index']  = $index;
 			$chunk_record['onesearch_total_chunks'] = count( $chunks );
+
+			// Final safety check: ensure the whole record encoded size fits the per-chunk limit.
+			$encoded_full = wp_json_encode( $chunk_record, JSON_INVALID_UTF8_SUBSTITUTE );
+			$full_len     = strlen( $encoded_full ?: '' );
+
+			if ( $full_len > self::PER_CHUNK_LIMIT ) {
+				// Try to progressively trim the content until it fits, otherwise fall back
+				// to an empty content field so the base record is still indexed.
+				$trim_step = 256;
+				while ( $full_len > self::PER_CHUNK_LIMIT && strlen( $chunk_record['content'] ) > 0 ) {
+					$chunk_record['content'] = substr( $chunk_record['content'], 0, max( 0, strlen( $chunk_record['content'] ) - $trim_step ) );
+					$encoded_full            = wp_json_encode( $chunk_record, JSON_INVALID_UTF8_SUBSTITUTE );
+					$full_len                = strlen( $encoded_full ?: '' );
+					if ( strlen( $chunk_record['content'] ) === 0 ) {
+						break;
+					}
+				}
+
+				if ( $full_len > self::PER_CHUNK_LIMIT ) {
+					// Give up on content — index the base record only for this chunk index.
+					error_log( 'chunk still too large after trimming ' . $chunk_record['objectID'] . ' size=' . $full_len );
+					$chunk_record['content'] = '';
+				}
+			}
 
 			$chunked_records[] = $chunk_record;
 		}
@@ -391,15 +431,15 @@ class Algolia_Index {
 	 *
 	 * @return string[] Content chunks.
 	 */
-	private function smart_chunk_content( $content, $max_size ) {
+	private function smart_chunk_content( string $content, int $max_size ): array {
 
-		$available_size = (int) $max_size - 100;
+		$available_size = $max_size - 100;
 
 		if ( $available_size <= 0 ) {
-			return [ mb_substr( (string) $content, 0, 1000 ) ];
+			return [ mb_substr( $content, 0, 1000 ) ];
 		}
 
-		return str_split( (string) $content, $available_size );
+		return str_split( $content, $available_size );
 	}
 
 	/**
