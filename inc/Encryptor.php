@@ -20,7 +20,7 @@ final class Encryptor {
 	 *
 	 * @var string
 	 */
-	private static string $method = 'aes-256-gcm';
+	private static string $method = 'aes-256-ctr';
 
 	/**
 	 * Encrypts a value using WordPress's built-in encryption.
@@ -35,9 +35,9 @@ final class Encryptor {
 		}
 
 		$ivlength = openssl_cipher_iv_length( self::$method );
-		$iv       = \openssl_random_pseudo_bytes( $ivlength );
+		$iv       = openssl_random_pseudo_bytes( $ivlength );
 
-		$value = openssl_encrypt( $raw_value, self::$method, self::get_key(), 0, $iv );
+		$value = openssl_encrypt( $raw_value . self::get_salt(), self::$method, self::get_key(), 0, $iv );
 
 		if ( ! $value ) {
 			return false;
